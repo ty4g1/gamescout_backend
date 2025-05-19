@@ -5,39 +5,59 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	"github.com/ty4g1/gamescout_backend/internal/config"
 	"github.com/ty4g1/gamescout_backend/internal/models"
 )
 
-func Populate() {
+type Populator struct {
+	Pages                 int
+	SteamSpyURLFormat     string
+	SteamSpyDetailsFormat string
+	SteamAPIDetailsFormat string
+	Vectorizer            *Vectorizer
+}
+
+func NewPopulator(cfg *config.Config) *Populator {
+	return &Populator{
+		Pages:                 cfg.SteamSpyPages,
+		SteamSpyURLFormat:     cfg.SteamSpyURLFormat,
+		SteamSpyDetailsFormat: cfg.SteamSpyDetailsFormat,
+		SteamAPIDetailsFormat: cfg.SteamAPIDetailsFormat,
+		Vectorizer:            NewVectorizer(cfg),
+	}
+}
+
+func (p *Populator) Populate() {
 	// Number of pages (with 1000 games each) to retrieve
 	const PAGES = 10
-	const STEAM_SPY_URL_FORMAT = "https://steamspy.com/api.php?request=all&page=%d"
-	const STEAM_SPY_DETAILS_URL_FORMAT = "https://steamspy.com/api.php?request=appdetails&appid=%d"
-	const STEAM_API_DETAILS_URL_FORMAT = "https://store.steampowered.com/api/appdetails?cc=us&appids=%d"
 
 	for i := range PAGES {
-		resp, err := http.Get(fmt.Sprintf(STEAM_SPY_URL_FORMAT, i))
+		resp, err := http.Get(fmt.Sprintf(p.SteamSpyURLFormat, i))
 		if err != nil {
-			log.Fatalf("Error making request: %v\n", err)
+			log.Printf("Error making request: %v\n", err)
+			continue
 		}
 
 		var games map[string]models.SteamspyResponse
 		if err := json.NewDecoder(resp.Body).Decode(&games); err != nil {
-			log.Fatalf("Error reading and parsing JSON: %v\n", err)
+			log.Printf("Error reading and parsing JSON: %v\n", err)
+			resp.Body.Close()
+			continue
 		}
 		resp.Body.Close()
 
 		for appIDKey, game := range games {
 			appID := game.AppID // Use the AppID from the struct
-			fmt.Printf("Got the following game: %s (AppID: %d)\n", game.Name, appID)
 
 			// Respect rate limits (1 request per second)
 			time.Sleep(1 * time.Second)
 
 			// Get Steam Spy details
-			respSpy, err := http.Get(fmt.Sprintf(STEAM_SPY_DETAILS_URL_FORMAT, appID))
+			respSpy, err := http.Get(fmt.Sprintf(p.SteamSpyDetailsFormat, appID))
 			if err != nil {
 				log.Printf("Error making Steam Spy details request for appID %d: %v\n", appID, err)
 				continue
@@ -53,7 +73,7 @@ func Populate() {
 			fmt.Printf("Steam Spy details: %+v\n", gameDetailsSpy)
 
 			// Get Steam API details
-			respAPI, err := http.Get(fmt.Sprintf(STEAM_API_DETAILS_URL_FORMAT, appID))
+			respAPI, err := http.Get(fmt.Sprintf(p.SteamAPIDetailsFormat, appID))
 			if err != nil {
 				log.Printf("Error making Steam API details request for appID %d: %v\n", appID, err)
 				continue
@@ -67,12 +87,7 @@ func Populate() {
 			}
 			respAPI.Body.Close()
 
-			// The Steam API response is nested, so we need to extract the actual data
-			if details, ok := gameDetailsAPI[appIDKey]; ok && details.Success {
-				fmt.Printf("Steam API details: %+v\n", details.Data)
-			} else {
-				log.Printf("Steam API returned unsuccessful response for appID %d\n", appID)
-			}
+			fmt.Println(createGameEntry(game, gameDetailsSpy, gameDetailsAPI, appIDKey, p.Vectorizer))
 
 			break // Only process one game for testing
 		}
@@ -80,4 +95,42 @@ func Populate() {
 		// Temporary, for testing with just 1 page
 		break
 	}
+}
+
+func createGameEntry(game models.SteamspyResponse, gameDetailsSpy models.SteamspyDetails, gameDetailsAPI models.SteamAPIDetailsWrapper, appIDKey string, vectorizer *Vectorizer) *models.Game {
+	// The Steam API response is nested, so we need to extract the actual data
+	otherDetails, ok := gameDetailsAPI[appIDKey]
+	if !(ok && otherDetails.Success) {
+		log.Printf("Steam API returned unsuccessful response for appID %v\n", appIDKey)
+		return nil
+	}
+
+	intPrice, _ := strconv.Atoi(game.Price)
+	intInitialPrice, _ := strconv.Atoi(game.InitialPrice)
+	intDiscount, _ := strconv.Atoi(game.Discount)
+
+	platforms := make([]string, 0, len(otherDetails.Data.Platforms))
+	for k, v := range otherDetails.Data.Platforms {
+		if v {
+			platforms = append(platforms, k)
+		}
+	}
+
+	gameEntry := &models.Game{
+		AppId:         game.AppID,
+		Name:          game.Name,
+		ShortDesc:     otherDetails.Data.ShortDesc,
+		Price:         intPrice,
+		InitialPrice:  intInitialPrice,
+		Discount:      intDiscount,
+		ReleaseDate:   otherDetails.Data.ReleaseDate.Date,
+		Genres:        strings.Split(gameDetailsSpy.Genres, " "),
+		Tags:          gameDetailsSpy.Tags,
+		Positive:      game.Positive,
+		Negative:      game.Negative,
+		Platforms:     platforms,
+		FeatureVector: vectorizer.Vectorize(gameDetailsSpy.Genres, gameDetailsSpy.Tags, otherDetails.Data.ShortDesc),
+	}
+
+	return gameEntry
 }

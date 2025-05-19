@@ -16,6 +16,9 @@ func main() {
 	// Load config
 	cfg := config.NewConfig()
 
+	// Load populator
+	pop := services.NewPopulator(cfg)
+
 	// Connect to database
 	conn, err := pgx.Connect(context.Background(), cfg.DatabaseURL)
 	if err != nil {
@@ -28,7 +31,8 @@ func main() {
 		log.Fatalf("Failed to ping database: %v\n", err)
 	}
 
-	services.Populate()
+	// Populate database
+	pop.Populate()
 
 	router := gin.Default()
 
