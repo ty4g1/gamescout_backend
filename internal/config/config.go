@@ -24,7 +24,7 @@ func NewConfig() *Config {
 	microserviceUrl := os.Getenv("MICROSERVICE_URL")
 	steamSpyPages, err := strconv.Atoi(os.Getenv("STEAM_SPY_PAGES"))
 	if err != nil {
-		log.Printf("Error getting page limit from env, defaulting to 5: %v", err)
+		log.Printf("Error getting page limit from env, defaulting to 5: %v\n", err)
 		steamSpyPages = 5
 	}
 	steamSpyUrlFormat := os.Getenv("STEAM_SPY_URL_FORMAT")

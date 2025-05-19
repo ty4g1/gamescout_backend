@@ -7,8 +7,9 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ty4g1/gamescout_backend/internal/config"
+	"github.com/ty4g1/gamescout_backend/internal/repository"
 	"github.com/ty4g1/gamescout_backend/internal/services"
 )
 
@@ -20,19 +21,19 @@ func main() {
 	pop := services.NewPopulator(cfg)
 
 	// Connect to database
-	conn, err := pgx.Connect(context.Background(), cfg.DatabaseURL)
+	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		log.Fatalf("Unable to create connection pool: %v\n", err)
 	}
-	defer conn.Close(context.Background())
+	defer dbpool.Close()
 
-	// Test database connection
-	if err := conn.Ping(context.Background()); err != nil {
-		log.Fatalf("Failed to ping database: %v\n", err)
-	}
+	// Create repositories
+	gr := repository.NewGamesRepository(dbpool)
+	gmr := repository.NewGameMediaRepository(dbpool)
 
 	// Populate database
-	pop.Populate()
+	fmt.Println("Populating database...")
+	pop.Populate(gr, gmr)
 
 	router := gin.Default()
 

@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 type Game struct {
 	AppId         int
 	Name          string
@@ -7,11 +9,11 @@ type Game struct {
 	Price         int
 	InitialPrice  int
 	Discount      int
-	ReleaseDate   string
+	ReleaseDate   time.Time
 	Genres        []string
 	Tags          map[string]int
 	Positive      int
 	Negative      int
 	Platforms     []string
-	FeatureVector []float32
+	FeatureVector []float64
 }

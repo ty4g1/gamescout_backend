@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/ty4g1/gamescout_backend/internal/config"
 	"github.com/ty4g1/gamescout_backend/internal/models"
+	"github.com/ty4g1/gamescout_backend/internal/repository"
 )
 
 type Populator struct {
@@ -31,11 +33,11 @@ func NewPopulator(cfg *config.Config) *Populator {
 	}
 }
 
-func (p *Populator) Populate() {
-	// Number of pages (with 1000 games each) to retrieve
-	const PAGES = 10
-
-	for i := range PAGES {
+func (p *Populator) Populate(gr *repository.GameRepository, gmr *repository.GameMediaRepository) {
+	// Each page returns 1000 game entries
+	totalGames := p.Pages * 1000
+	counter := 0
+	for i := range p.Pages {
 		resp, err := http.Get(fmt.Sprintf(p.SteamSpyURLFormat, i))
 		if err != nil {
 			log.Printf("Error making request: %v\n", err)
@@ -50,7 +52,11 @@ func (p *Populator) Populate() {
 		}
 		resp.Body.Close()
 
+		gameEntries := make([]*models.Game, 0, 1000)
+		gameMediaEntries := make([]*models.GameMedia, 0, 1000)
+
 		for appIDKey, game := range games {
+			fmt.Printf("Processing game %d/%d\n", counter, totalGames)
 			appID := game.AppID // Use the AppID from the struct
 
 			// Respect rate limits (1 request per second)
@@ -70,7 +76,6 @@ func (p *Populator) Populate() {
 				continue
 			}
 			respSpy.Body.Close()
-			fmt.Printf("Steam Spy details: %+v\n", gameDetailsSpy)
 
 			// Get Steam API details
 			respAPI, err := http.Get(fmt.Sprintf(p.SteamAPIDetailsFormat, appID))
@@ -79,58 +84,90 @@ func (p *Populator) Populate() {
 				continue
 			}
 
-			var gameDetailsAPI models.SteamAPIDetailsWrapper
-			if err := json.NewDecoder(respAPI.Body).Decode(&gameDetailsAPI); err != nil {
+			var gameDetailsApi models.SteamAPIDetailsWrapper
+			if err := json.NewDecoder(respAPI.Body).Decode(&gameDetailsApi); err != nil {
 				log.Printf("Error parsing Steam API details for appID %d: %v\n", appID, err)
 				respAPI.Body.Close()
 				continue
 			}
 			respAPI.Body.Close()
 
-			fmt.Println(createGameEntry(game, gameDetailsSpy, gameDetailsAPI, appIDKey, p.Vectorizer))
+			// The Steam API response is nested, so we need to extract the actual data
+			otherDetails, ok := gameDetailsApi[appIDKey]
+			if !(ok && otherDetails.Success) {
+				log.Printf("Steam API returned unsuccessful response for appID %v\n", appIDKey)
+				continue
+			}
 
-			break // Only process one game for testing
+			gameEntry, err := createGameEntry(game, gameDetailsSpy, otherDetails.Data, appIDKey, p.Vectorizer)
+			if err != nil {
+				log.Printf("Error creating game entry for appID %v: %v\n", appIDKey, err)
+				continue
+			}
+
+			gameMediaEntry := createGameMediaEntry(otherDetails.Data, appID)
+
+			gameEntries = append(gameEntries, gameEntry)
+			gameMediaEntries = append(gameMediaEntries, gameMediaEntry)
+			counter += 1
 		}
 
-		// Temporary, for testing with just 1 page
-		break
+		err = gr.BatchInsert(context.Background(), gameEntries)
+		if err != nil {
+			log.Printf("Error inserting entries into Games table %v\n", err)
+			continue
+		}
+		err = gmr.BatchInsert(context.Background(), gameMediaEntries)
+		if err != nil {
+			log.Printf("Error inserting entries into Games_media table %v\n", err)
+			continue
+		}
 	}
 }
 
-func createGameEntry(game models.SteamspyResponse, gameDetailsSpy models.SteamspyDetails, gameDetailsAPI models.SteamAPIDetailsWrapper, appIDKey string, vectorizer *Vectorizer) *models.Game {
-	// The Steam API response is nested, so we need to extract the actual data
-	otherDetails, ok := gameDetailsAPI[appIDKey]
-	if !(ok && otherDetails.Success) {
-		log.Printf("Steam API returned unsuccessful response for appID %v\n", appIDKey)
-		return nil
-	}
-
+func createGameEntry(game models.SteamspyResponse, gameDetailsSpy models.SteamspyDetails, gameDetailsApi models.SteamAPIDetails, appIDKey string, vectorizer *Vectorizer) (*models.Game, error) {
 	intPrice, _ := strconv.Atoi(game.Price)
 	intInitialPrice, _ := strconv.Atoi(game.InitialPrice)
 	intDiscount, _ := strconv.Atoi(game.Discount)
 
-	platforms := make([]string, 0, len(otherDetails.Data.Platforms))
-	for k, v := range otherDetails.Data.Platforms {
+	platforms := make([]string, 0, len(gameDetailsApi.Platforms))
+	for k, v := range gameDetailsApi.Platforms {
 		if v {
 			platforms = append(platforms, k)
 		}
+	}
+	fmt.Println(gameDetailsApi.ReleaseDate.Date)
+	release_date, err := time.Parse("Jan 2, 2006", gameDetailsApi.ReleaseDate.Date)
+	if err != nil {
+		return nil, err
 	}
 
 	gameEntry := &models.Game{
 		AppId:         game.AppID,
 		Name:          game.Name,
-		ShortDesc:     otherDetails.Data.ShortDesc,
+		ShortDesc:     gameDetailsApi.ShortDesc,
 		Price:         intPrice,
 		InitialPrice:  intInitialPrice,
 		Discount:      intDiscount,
-		ReleaseDate:   otherDetails.Data.ReleaseDate.Date,
+		ReleaseDate:   release_date,
 		Genres:        strings.Split(gameDetailsSpy.Genres, " "),
 		Tags:          gameDetailsSpy.Tags,
 		Positive:      game.Positive,
 		Negative:      game.Negative,
 		Platforms:     platforms,
-		FeatureVector: vectorizer.Vectorize(gameDetailsSpy.Genres, gameDetailsSpy.Tags, otherDetails.Data.ShortDesc),
+		FeatureVector: vectorizer.Vectorize(gameDetailsSpy.Genres, gameDetailsSpy.Tags, gameDetailsApi.ShortDesc),
 	}
 
-	return gameEntry
+	return gameEntry, nil
+}
+
+func createGameMediaEntry(gameDetailsAPI models.SteamAPIDetails, appId int) *models.GameMedia {
+	gameMediaEntry := &models.GameMedia{
+		AppID:         appId,
+		ThumbnailURL:  gameDetailsAPI.Thumbnail,
+		BackgroundURL: gameDetailsAPI.Background,
+		Screenshots:   gameDetailsAPI.Screenshots,
+	}
+
+	return gameMediaEntry
 }
