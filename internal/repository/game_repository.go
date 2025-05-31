@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,9 +69,115 @@ func (gr *GameRepository) BatchInsert(ctx context.Context, games []*models.Game)
 	br.Close()
 
 	if err := tx.Commit(ctx); err != nil {
-		fmt.Println("yoooo")
 		return err
 	}
 
 	return nil
+}
+
+func (gr *GameRepository) GetRandom(ctx context.Context, limit int, priceRange *models.PriceRange, releaseDate *models.ReleaseDate, tags []string, genres []string, platforms []string) ([]models.Game, error) {
+
+	args := []any{limit, priceRange.Min, priceRange.Max}
+	query := []string{`
+		SELECT appid, name, short_description, price, initial_price, discount, 
+           release_date, genres, tags, positive, negative, platforms, feature_vector
+    FROM Games
+    WHERE price BETWEEN $2 AND $3
+	`}
+
+	paramCount := 4
+
+	if releaseDate != nil {
+		dateOperator := ">"
+		if releaseDate.IsBefore {
+			dateOperator = "<"
+		}
+		args = append(args, releaseDate.Date)
+		query = append(query, fmt.Sprintf("AND release_date %s $%d", dateOperator, paramCount))
+		paramCount++
+	}
+
+	if tags != nil {
+		args = append(args, tags)
+		query = append(query, fmt.Sprintf("AND tags ?| $%d", paramCount))
+		paramCount++
+	}
+
+	if genres != nil {
+		args = append(args, genres)
+		query = append(query, fmt.Sprintf("AND genres && $%d", paramCount))
+		paramCount++
+	}
+
+	if platforms != nil {
+		args = append(args, platforms)
+		query = append(query, fmt.Sprintf("AND platforms && $%d", paramCount))
+		paramCount++
+	}
+
+	query = append(query, `
+		ORDER BY RANDOM()
+		LIMIT $1
+	`)
+
+	conn, err := gr.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, strings.Join(query, "\n"), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var games []models.Game
+
+	for rows.Next() {
+		var game models.Game
+		var tagsJSON []byte
+
+		err := rows.Scan(
+			&game.AppId,
+			&game.Name,
+			&game.ShortDesc,
+			&game.Price,
+			&game.InitialPrice,
+			&game.Discount,
+			&game.ReleaseDate,
+			&game.Genres,
+			&tagsJSON, // Scan JSONB as []byte first
+			&game.Positive,
+			&game.Negative,
+			&game.Platforms,
+			&game.FeatureVector,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Parse the JSONB tags
+		if err := json.Unmarshal(tagsJSON, &game.Tags); err != nil {
+			return nil, err
+		}
+
+		games = append(games, game)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return games, nil
 }

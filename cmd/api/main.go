@@ -4,21 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 
-	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
+	routes "github.com/ty4g1/gamescout_backend/internal/api"
 	"github.com/ty4g1/gamescout_backend/internal/config"
 	"github.com/ty4g1/gamescout_backend/internal/repository"
-	"github.com/ty4g1/gamescout_backend/internal/services"
 )
 
 func main() {
 	// Load config
 	cfg := config.NewConfig()
-
-	// Load populator
-	pop := services.NewPopulator(cfg)
 
 	// Connect to database
 	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
@@ -31,19 +26,21 @@ func main() {
 	gr := repository.NewGamesRepository(dbpool)
 	gmr := repository.NewGameMediaRepository(dbpool)
 
-	// Populate database
-	fmt.Println("Populating database...")
-	pop.Populate(gr, gmr)
+	// go func() {
+	// 	pop := services.NewPopulator(cfg)
+	// 	for {
+	// 		fmt.Println("Starting database population in background...")
+	// 		start := time.Now()
+	// 		pop.Populate(gr, gmr)
+	// 		fmt.Printf("Database population completed successfully in %v!\n", time.Since(start))
+	// 		fmt.Println("Next population will run in 24 hours...")
+	// 		time.Sleep(24 * time.Hour)
+	// 	}
+	// }()
 
-	router := gin.Default()
-
-	router.GET("/", ping)
+	router := routes.SetupRouter(gr, gmr)
 
 	fmt.Println("Starting server...")
 
 	router.Run(cfg.ServerAddress)
-}
-
-func ping(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK, gin.H{"message": "You have reached test server!"})
 }

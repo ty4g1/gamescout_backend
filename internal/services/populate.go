@@ -56,7 +56,9 @@ func (p *Populator) Populate(gr *repository.GameRepository, gmr *repository.Game
 		gameMediaEntries := make([]*models.GameMedia, 0, 1000)
 
 		for appIDKey, game := range games {
-			fmt.Printf("Processing game %d/%d\n", counter, totalGames)
+			if counter%1000 == 0 {
+				fmt.Printf("Processed games: %d/%d\n", counter, totalGames)
+			}
 			appID := game.AppID // Use the AppID from the struct
 
 			// Respect rate limits (1 request per second)
@@ -136,7 +138,7 @@ func createGameEntry(game models.SteamspyResponse, gameDetailsSpy models.Steamsp
 			platforms = append(platforms, k)
 		}
 	}
-	fmt.Println(gameDetailsApi.ReleaseDate.Date)
+
 	release_date, err := time.Parse("Jan 2, 2006", gameDetailsApi.ReleaseDate.Date)
 	if err != nil {
 		return nil, err
@@ -167,6 +169,7 @@ func createGameMediaEntry(gameDetailsAPI models.SteamAPIDetails, appId int) *mod
 		ThumbnailURL:  gameDetailsAPI.Thumbnail,
 		BackgroundURL: gameDetailsAPI.Background,
 		Screenshots:   gameDetailsAPI.Screenshots,
+		Movies:        gameDetailsAPI.Movies,
 	}
 
 	return gameMediaEntry

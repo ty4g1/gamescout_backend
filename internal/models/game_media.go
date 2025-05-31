@@ -5,4 +5,5 @@ type GameMedia struct {
 	ThumbnailURL  string
 	BackgroundURL string
 	Screenshots   []Screenshot
+	Movies        []Movie
 }
