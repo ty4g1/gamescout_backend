@@ -65,6 +65,9 @@ RUN adduser \
     --no-create-home \
     --uid "${UID}" \
     appuser
+
+RUN apk add --no-cache curl
+
 USER appuser
 
 # Copy the executable from the "build" stage.

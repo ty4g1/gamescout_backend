@@ -13,7 +13,10 @@ func SetupRouter(gr *repository.GameRepository, gmr *repository.GameMediaReposit
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowOrigins: []string{
+			"http://localhost:4173", // preview/production
+			"http://localhost:5173", // dev server (if you ever run npm run dev)
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -23,7 +26,7 @@ func SetupRouter(gr *repository.GameRepository, gmr *repository.GameMediaReposit
 	gameHandler := handlers.NewGameHandler(gr, gmr, ur)
 	userHandler := handlers.NewUserHandler(ur, gr)
 
-	router.GET("/", ping)
+	router.GET("/health", healthCheck)
 	router.GET("/games/random", gameHandler.GetRandomGames)
 	router.GET("/games/recommend", gameHandler.GetRecommendations)
 	router.GET("/games/tags", gameHandler.GetTags)
@@ -35,6 +38,6 @@ func SetupRouter(gr *repository.GameRepository, gmr *repository.GameMediaReposit
 	return router
 }
 
-func ping(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK, gin.H{"message": "You have reached test server!"})
+func healthCheck(c *gin.Context) {
+	c.IndentedJSON(http.StatusOK, gin.H{"message": "Service is healthy!"})
 }
