@@ -14,8 +14,8 @@ func SetupRouter(gr *repository.GameRepository, gmr *repository.GameMediaReposit
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: []string{
-			"http://localhost:4173", // preview/production
-			"http://localhost:5173", // dev server (if you ever run npm run dev)
+			"http://165.22.59.11:4173", // preview/production
+			"http://localhost:5173",    // dev server (if you ever run npm run dev)
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
