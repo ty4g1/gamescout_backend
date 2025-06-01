@@ -25,6 +25,7 @@ func main() {
 	// Create repositories
 	gr := repository.NewGamesRepository(dbpool)
 	gmr := repository.NewGameMediaRepository(dbpool)
+	ur := repository.NewUserRepository(dbpool)
 
 	// go func() {
 	// 	pop := services.NewPopulator(cfg)
@@ -38,7 +39,7 @@ func main() {
 	// 	}
 	// }()
 
-	router := routes.SetupRouter(gr, gmr)
+	router := routes.SetupRouter(gr, gmr, ur)
 
 	fmt.Println("Starting server...")
 

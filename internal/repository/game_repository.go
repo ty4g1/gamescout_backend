@@ -42,18 +42,18 @@ func (gr *GameRepository) BatchInsert(ctx context.Context, games []*models.Game)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			ON CONFLICT (appid) DO UPDATE SET
 				name = $2,
-                short_description = $3,
-                price = $4,
-                initial_price = $5,
-                discount = $6,
-                release_date = $7,
-                genres = $8,
-                tags = $9,
-                positive = $10,
-                negative = $11,
-                platforms = $12,
-                feature_vector = $13,
-                last_updated = CURRENT_TIMESTAMP
+				short_description = $3,
+				price = $4,
+				initial_price = $5,
+				discount = $6,
+				release_date = $7,
+				genres = $8,
+				tags = $9,
+				positive = $10,
+				negative = $11,
+				platforms = $12,
+				feature_vector = $13,
+				last_updated = CURRENT_TIMESTAMP
 		`, game.AppId, game.Name, game.ShortDesc, game.Price, game.InitialPrice, game.Discount, game.ReleaseDate, game.Genres, game.Tags, game.Positive, game.Negative, game.Platforms, game.FeatureVector)
 	}
 
@@ -73,6 +73,98 @@ func (gr *GameRepository) BatchInsert(ctx context.Context, games []*models.Game)
 	}
 
 	return nil
+}
+
+func (gr *GameRepository) GetAll(ctx context.Context, priceRange *models.PriceRange, releaseDate *models.ReleaseDate, tags []string, genres []string, platforms []string) ([]models.Game, error) {
+
+	args := []any{priceRange.Min, priceRange.Max}
+	query := []string{`
+		SELECT appid, name, short_description, price, initial_price, discount, 
+           release_date, genres, tags, positive, negative, platforms, feature_vector
+    FROM Games
+    WHERE price BETWEEN $1 AND $2
+	`}
+
+	paramCount := 3
+
+	if releaseDate != nil {
+		dateOperator := ">"
+		if releaseDate.IsBefore {
+			dateOperator = "<"
+		}
+		args = append(args, releaseDate.Date)
+		query = append(query, fmt.Sprintf("AND release_date %s $%d", dateOperator, paramCount))
+		paramCount++
+	}
+
+	if tags != nil {
+		args = append(args, tags)
+		query = append(query, fmt.Sprintf("AND tags ?| $%d", paramCount))
+		paramCount++
+	}
+
+	if genres != nil {
+		args = append(args, genres)
+		query = append(query, fmt.Sprintf("AND genres && $%d", paramCount))
+		paramCount++
+	}
+
+	if platforms != nil {
+		args = append(args, platforms)
+		query = append(query, fmt.Sprintf("AND platforms && $%d", paramCount))
+		paramCount++
+	}
+
+	conn, err := gr.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(ctx, strings.Join(query, "\n"), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var games []models.Game
+
+	for rows.Next() {
+		var game models.Game
+		var tagsJSON []byte
+
+		err := rows.Scan(
+			&game.AppId,
+			&game.Name,
+			&game.ShortDesc,
+			&game.Price,
+			&game.InitialPrice,
+			&game.Discount,
+			&game.ReleaseDate,
+			&game.Genres,
+			&tagsJSON, // Scan JSONB as []byte first
+			&game.Positive,
+			&game.Negative,
+			&game.Platforms,
+			&game.FeatureVector,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		// Parse the JSONB tags
+		if err := json.Unmarshal(tagsJSON, &game.Tags); err != nil {
+			return nil, err
+		}
+
+		games = append(games, game)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return games, nil
 }
 
 func (gr *GameRepository) GetRandom(ctx context.Context, limit int, priceRange *models.PriceRange, releaseDate *models.ReleaseDate, tags []string, genres []string, platforms []string) ([]models.Game, error) {
@@ -180,4 +272,117 @@ func (gr *GameRepository) GetRandom(ctx context.Context, limit int, priceRange *
 	}
 
 	return games, nil
+}
+
+func (gr *GameRepository) GetFeatureVecByAppIDs(ctx context.Context, AppIDs []int) ([][]float64, error) {
+
+	query := `
+		SELECT feature_vector
+    FROM Games
+    WHERE appid = ANY($1)
+	`
+
+	conn, err := gr.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(ctx, query, AppIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var vectors [][]float64
+
+	for rows.Next() {
+		var vector []float64
+
+		err := rows.Scan(
+			&vector,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		vectors = append(vectors, vector)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return vectors, nil
+}
+
+func (gr *GameRepository) GetAllTags(ctx context.Context) ([]string, error) {
+	query := `
+        SELECT DISTINCT jsonb_object_keys(tags) as tag_name 
+        FROM Games 
+        WHERE tags IS NOT NULL
+        ORDER BY tag_name
+    `
+
+	conn, err := gr.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var allTags []string
+	for rows.Next() {
+		var tag string
+		if err := rows.Scan(&tag); err != nil {
+			return nil, err
+		}
+		allTags = append(allTags, tag)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return allTags, nil
+}
+
+func (gr *GameRepository) GetAllGenres(ctx context.Context) ([]string, error) {
+	query := `
+        SELECT DISTINCT UNNEST(genres) 
+        FROM Games 
+        WHERE genres IS NOT NULL
+    `
+
+	conn, err := gr.Pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	rows, err := conn.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var allGenres []string
+	for rows.Next() {
+		var genre string
+		if err := rows.Scan(&genre); err != nil {
+			return nil, err
+		}
+		allGenres = append(allGenres, genre)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return allGenres, nil
 }
