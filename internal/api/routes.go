@@ -14,8 +14,9 @@ func SetupRouter(gr *repository.GameRepository, gmr *repository.GameMediaReposit
 
 	router.Use(cors.New(cors.Config{
 		AllowOrigins: []string{
-			"http://localhost:4173",     // frontend
-			"http://146.190.88.58:4173", // DigitalOcean droplet
+			"http://localhost:4173",          // frontend
+			"http://146.190.88.58:4173",      // DigitalOcean droplet
+			"http://gamescout.mooo.com:4173", // FreeDNS domain
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
