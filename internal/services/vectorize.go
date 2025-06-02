@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ty4g1/gamescout_backend/internal/config"
@@ -21,6 +23,11 @@ func NewVectorizer(cfg *config.Config) *Vectorizer {
 }
 
 func (v *Vectorizer) Vectorize(genres string, tags map[string]int, shortDesc string) []float64 {
+	VECTOR_DIM, err := strconv.Atoi(os.Getenv("VECTOR_DIM"))
+	if err != nil {
+		VECTOR_DIM = 384
+	}
+
 	keys := make([]string, 0, len(tags))
 	for k := range tags {
 		keys = append(keys, k)
@@ -39,13 +46,13 @@ func (v *Vectorizer) Vectorize(genres string, tags map[string]int, shortDesc str
 	jsonData, err := json.Marshal(requestBody)
 	if err != nil {
 		log.Printf("Error parsing into JSON: %v\n", err)
-		return make([]float64, 300)
+		return make([]float64, VECTOR_DIM)
 	}
 
 	resp, err := http.Post(v.MicroserviceURL, "application/json", bytes.NewReader(jsonData))
 	if err != nil {
 		log.Printf("Error getting feature vector: %v\n", err)
-		return make([]float64, 300)
+		return make([]float64, VECTOR_DIM)
 	}
 	defer resp.Body.Close()
 
@@ -54,7 +61,7 @@ func (v *Vectorizer) Vectorize(genres string, tags map[string]int, shortDesc str
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&serviceResponse); err != nil {
 		log.Printf("Error parsing JSON: %v\n", err)
-		return make([]float64, 300)
+		return make([]float64, VECTOR_DIM)
 	}
 
 	return serviceResponse.Vector

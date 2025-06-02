@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"os"
+	"strconv"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ty4g1/gamescout_backend/internal/models"
@@ -18,6 +20,10 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 }
 
 func (ur *UserRepository) AddUser(ctx context.Context, id string) (*models.User, error) {
+	VECTOR_DIM, err := strconv.Atoi(os.Getenv("VECTOR_DIM"))
+	if err != nil {
+		VECTOR_DIM = 384
+	}
 	conn, err := ur.Pool.Acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -33,7 +39,7 @@ func (ur *UserRepository) AddUser(ctx context.Context, id string) (*models.User,
 			swipe_history = $2,
 			preference_vector = $3
 		RETURNING cookie_id, swipe_history, preference_vector
-	`, id, []string{}, make([]float64, 300)).Scan(&user.ID, &user.SwipeHistory, &user.PreferenceVector)
+	`, id, []string{}, make([]float64, VECTOR_DIM)).Scan(&user.ID, &user.SwipeHistory, &user.PreferenceVector)
 	if err != nil {
 		return nil, err
 	}
