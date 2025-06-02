@@ -211,8 +211,8 @@ func (gh *GameHandler) GetRecommendations(c *gin.Context) {
 		return
 	}
 
-	swipeSet := make(map[int]bool, len(swipeHistory))
-	for _, appId := range swipeHistory {
+	swipeSet := make(map[int]bool, 100)
+	for _, appId := range swipeHistory[len(swipeHistory)-100:] {
 		swipeSet[appId] = true
 	}
 
